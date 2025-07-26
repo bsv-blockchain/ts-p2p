@@ -14,15 +14,34 @@ import { generateKeyPair } from '@libp2p/crypto/keys';
 import type { PrivateKey } from '@libp2p/interface';
 
 // Type definitions
-type MessageCallback = (data: Uint8Array, topic: string, from: string) => void;
-type TopicCallbacks = Record<string, MessageCallback>;
+type MessageCallback = (data: Uint8Array, topic: Topic, from: string) => void;
+
+/**
+ * Topic types for Teranode P2P messages
+ * 
+ * 'bitcoin/mainnet-bestblock' is for the best block message
+ * 'bitcoin/mainnet-block' is for when miners find a block solution
+ * 'bitcoin/mainnet-subtree' is for when a subtree is created
+ * 'bitcoin/mainnet-mining_on' is for when mining is enabled
+ * 'bitcoin/mainnet-handshake' is for when a peer connects to the network
+ * 'bitcoin/mainnet-rejected_tx' is for when a transaction is rejected
+ */
+export type Topic = 
+'bitcoin/mainnet-bestblock' |
+'bitcoin/mainnet-block' |
+'bitcoin/mainnet-subtree' |
+'bitcoin/mainnet-mining_on' |
+'bitcoin/mainnet-handshake' |
+'bitcoin/mainnet-rejected_tx'
+
+type TopicCallbacks = Partial<Record<Topic, MessageCallback>>;
 
 interface SubscriberConfig {
   bootstrapPeers?: string[]; // Array of bootstrap peer multiaddrs
   staticPeers?: string[]; // Optional array of static peer multiaddrs
   sharedKey?: string; // Hex string of the shared PSK (without headers)
   dhtProtocolID?: string; // DHT protocol prefix, default '/teranode'
-  topics?: string[]; // Array of topics to subscribe to
+  topics?: Topic[]; // Array of topics to subscribe to
   listenAddresses?: string[]; // Listening addresses
   usePrivateDHT?: boolean; // Whether to use private DHT
 }
@@ -63,7 +82,7 @@ export class TeranodeListener {
       return;
     }
 
-    const topics = Object.keys(this.topicCallbacks);
+    const topics = Object.keys(this.topicCallbacks) as Topic[];
     const fullConfig: SubscriberConfig = {
       ...this.config,
       topics
@@ -167,7 +186,7 @@ export class TeranodeListener {
   /**
    * Add a new topic callback
    */
-  addTopicCallback(topic: string, callback: MessageCallback): void {
+  addTopicCallback(topic: Topic, callback: MessageCallback): void {
     this.topicCallbacks[topic] = callback;
     
     if (this.node) {
@@ -179,7 +198,7 @@ export class TeranodeListener {
   /**
    * Remove a topic callback
    */
-  removeTopicCallback(topic: string): void {
+  removeTopicCallback(topic: Topic): void {
     delete this.topicCallbacks[topic];
     
     if (this.node) {
@@ -226,13 +245,14 @@ export class TeranodeListener {
     // Subscribe to topics and handle messages with callbacks
     (this.node.services.pubsub as any).addEventListener('gossipsub:message', (evt: any) => {
       const msg = evt.detail.msg;
-      const callback = this.topicCallbacks[msg.topic];
+      const topicKey = msg.topic as Topic;
+      const callback = this.topicCallbacks[topicKey];
       
       if (callback) {
         try {
-          callback(msg.data, msg.topic, evt.detail.propagationSource.toString());
+          callback(msg.data, topicKey, evt.detail.propagationSource.toString());
         } catch (error) {
-          console.error(`Error in callback for topic ${msg.topic}:`, error);
+          console.error(`Error in callback for topic ${topicKey}:`, error);
         }
       } else {
         console.log(`Received message on unhandled topic "${msg.topic}"`);
@@ -240,7 +260,7 @@ export class TeranodeListener {
     });
 
     // Subscribe to all topics
-    for (const topic of Object.keys(this.topicCallbacks)) {
+    for (const topic of Object.keys(this.topicCallbacks) as Topic[]) {
       (this.node.services.pubsub as any).subscribe(topic);
       console.log(`Subscribed to topic: ${topic}`);
     }
@@ -305,7 +325,14 @@ export async function startSubscriber(config: SubscriberConfig = {}): Promise<vo
     ],
     sharedKey = '285b49e6d910726a70f205086c39cbac6d8dcc47839053a21b1f614773bbc137',
     dhtProtocolID = '/teranode',
-    topics = ['teranode/blocks', 'teranode/transactions'],
+    topics = [
+      'bitcoin/mainnet-bestblock',
+      'bitcoin/mainnet-block',
+      'bitcoin/mainnet-subtree',
+      'bitcoin/mainnet-mining_on',
+      'bitcoin/mainnet-handshake',
+      'bitcoin/mainnet-rejected_tx'
+    ],
     listenAddresses = ['/ip4/127.0.0.1/tcp/9901'],
     usePrivateDHT = true,
   } = config;
@@ -373,13 +400,13 @@ export async function startSubscriber(config: SubscriberConfig = {}): Promise<vo
   });
 
   // Subscribe to topics and handle messages
-  node.services.pubsub.addEventListener('gossipsub:message', (evt) => {
-    const msg = evt.detail.msg;
-    console.log(`[${msg.topic}] ${msg.data} - from: ${evt.detail.propagationSource}`);
-  });
+  // node.services.pubsub.addEventListener('gossipsub:message', (evt) => {
+  //   const msg = evt.detail.msg;
+  //   console.log(`[${msg.topic}] ${msg.data} - from: ${evt.detail.propagationSource}`);
+  // });
 
   for (const topic of topics) {
-    node.services.pubsub.subscribe(topic);
+    (node.services.pubsub as any).subscribe(topic);
     console.log(`Subscribed to topic: ${topic}`);
   }
 

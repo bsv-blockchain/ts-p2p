@@ -149,8 +149,8 @@ const listener = new TeranodeListener({
 
 #### Methods
 
-- `addTopicCallback(topic: string, callback: MessageCallback): void` - Add a new topic subscription
-- `removeTopicCallback(topic: string): void` - Remove a topic subscription
+- `addTopicCallback(topic: Topic, callback: MessageCallback): void` - Add a new topic subscription
+- `removeTopicCallback(topic: Topic): void` - Remove a topic subscription
 - `stop(): Promise<void>` - Stop the listener
 - `getNode(): Libp2p | null` - Get the underlying libp2p node
 - `getConnectedPeerCount(): number` - Get number of connected peers
@@ -158,8 +158,17 @@ const listener = new TeranodeListener({
 #### Types
 
 ```typescript
-type MessageCallback = (data: Uint8Array, topic: string, from: string) => void;
-type TopicCallbacks = Record<string, MessageCallback>;
+// Supported Teranode P2P topics
+export type Topic = 
+  'bitcoin/mainnet-bestblock' |    // Best block message
+  'bitcoin/mainnet-block' |        // When miners find a block solution
+  'bitcoin/mainnet-subtree' |      // When a subtree is created
+  'bitcoin/mainnet-mining_on' |    // When mining is enabled
+  'bitcoin/mainnet-handshake' |    // When a peer connects to the network
+  'bitcoin/mainnet-rejected_tx';   // When a transaction is rejected
+
+type MessageCallback = (data: Uint8Array, topic: Topic, from: string) => void;
+type TopicCallbacks = Partial<Record<Topic, MessageCallback>>;
 
 interface TeranodeListenerConfig {
   bootstrapPeers?: string[];       // Bootstrap peer multiaddrs (default: Teranode mainnet bootstrap)
@@ -193,7 +202,7 @@ interface SubscriberConfig {
   staticPeers?: string[];          // Static peer multiaddrs (default: Known Teranode mainnet peers)
   sharedKey?: string;              // Hex string of PSK (default: Teranode mainnet key)
   dhtProtocolID?: string;          // DHT protocol prefix (default: '/teranode')
-  topics?: string[];               // Topics to subscribe to (default: ['teranode/blocks', 'teranode/transactions'])
+  topics?: Topic[];                // Topics to subscribe to (default: all Teranode topics)
   listenAddresses?: string[];      // Listen addresses (default: ['/ip4/127.0.0.1/tcp/9901'])
   usePrivateDHT?: boolean;         // Whether to use private DHT (default: true)
 }
@@ -240,15 +249,15 @@ The `sharedKey` should be provided as a hexadecimal string without the PSK heade
 ### Example 1: Basic TeranodeListener Usage
 
 ```typescript
-import { TeranodeListener } from '@bsv/teranode-p2p-listener';
+import { TeranodeListener, type Topic } from '@bsv/teranode-p2p-listener';
 
 // Simple callback-based listener
 const listener = new TeranodeListener({
-  'bitcoin/mainnet-block': (data, topic, from) => {
+  'bitcoin/mainnet-block': (data: Uint8Array, topic: Topic, from: string) => {
     console.log(`New block from ${from}:`, data.length, 'bytes');
     // Process block data
   },
-  'bitcoin/mainnet-subtree': (data, topic, from) => {
+  'bitcoin/mainnet-subtree': (data: Uint8Array, topic: Topic, from: string) => {
     console.log(`Subtree update from ${from}:`, data.length, 'bytes');
     // Process subtree data
   }

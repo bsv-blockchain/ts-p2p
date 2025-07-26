@@ -1,15 +1,21 @@
-import { TeranodeListener } from './src/index';
+import { TeranodeListener, type Topic } from './src/index';
 
 // Demo of the new TeranodeListener API
-const blockCallback = (data: Uint8Array, topic: string, from: string) => {
+const blockCallback = (data: Uint8Array, topic: Topic, from: string) => {
   console.log(`📦 New block received from ${from}:`);
   console.log(`   Topic: ${topic}`);
   console.log(`   Data size: ${data.length} bytes`);
   console.log(`   Data preview: ${Array.from(data.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')}...`);
 };
 
-const subtreeCallback = (data: Uint8Array, topic: string, from: string) => {
+const subtreeCallback = (data: Uint8Array, topic: Topic, from: string) => {
   console.log(`🌳 Subtree update from ${from}:`);
+  console.log(`   Topic: ${topic}`);
+  console.log(`   Data size: ${data.length} bytes`);
+};
+
+const bestBlockCallback = (data: Uint8Array, topic: Topic, from: string) => {
+  console.log(`🏆 Best block update from ${from}:`);
   console.log(`   Topic: ${topic}`);
   console.log(`   Data size: ${data.length} bytes`);
 };
@@ -19,7 +25,8 @@ console.log('🚀 Starting TeranodeListener demo...');
 
 const listener = new TeranodeListener({
   'bitcoin/mainnet-block': blockCallback,
-  'bitcoin/mainnet-subtree': subtreeCallback
+  'bitcoin/mainnet-subtree': subtreeCallback,
+  'bitcoin/mainnet-bestblock': bestBlockCallback
 });
 
 console.log('✅ TeranodeListener created and starting...');
@@ -28,9 +35,9 @@ console.log('⏳ Waiting for messages...');
 
 // Add a dynamic topic after 10 seconds
 setTimeout(() => {
-  console.log('➕ Adding mempool topic dynamically...');
-  listener.addTopicCallback('bitcoin/mainnet-mempool', (data, topic, from) => {
-    console.log(`💾 Mempool update from ${from}: ${data.length} bytes`);
+  console.log('➕ Adding mining topic dynamically...');
+  listener.addTopicCallback('bitcoin/mainnet-mining_on', (data, topic, from) => {
+    console.log(`⛏️ Mining status update from ${from}: ${data.length} bytes`);
   });
 }, 10000);
 
