@@ -1,276 +1,277 @@
-import { createLibp2p, Libp2p } from 'libp2p';
+import { createLibp2p, type Libp2p } from 'libp2p';
 import { tcp } from '@libp2p/tcp';
-import { yamux } from '@chainsafe/libp2p-yamux';
 import { noise } from '@chainsafe/libp2p-noise';
-import { gossipsub, type GossipSub } from '@chainsafe/libp2p-gossipsub';
+import { yamux } from '@chainsafe/libp2p-yamux';
 import { bootstrap } from '@libp2p/bootstrap';
-import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery'
-import { identify } from '@libp2p/identify';
 import { kadDHT } from '@libp2p/kad-dht';
-import { ping } from '@libp2p/ping';
+import { gossipsub, type GossipSub } from '@chainsafe/libp2p-gossipsub';
 import { preSharedKey } from '@libp2p/pnet';
+import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery';
+import { identify } from '@libp2p/identify';
+import { ping } from '@libp2p/ping';
 import { multiaddr } from '@multiformats/multiaddr';
-import { peerIdFromString } from '@libp2p/peer-id';
+import { generateKeyPair } from '@libp2p/crypto/keys';
+import type { PrivateKey } from '@libp2p/interface';
 
-export interface P2PNodeOptions {
-  listenAddresses?: string[];
-  bootstrapPeers?: string[];
-  staticPeers?: string[];
-  usePrivateDHT?: boolean;
-  sharedKey?: string;
-  dhtProtocolID?: string;
-  port?: number;
+// Type definitions
+type MessageCallback = (data: Uint8Array, topic: string, from: string) => void;
+type TopicCallbacks = Record<string, MessageCallback>;
+
+interface SubscriberConfig {
+  bootstrapPeers?: string[]; // Array of bootstrap peer multiaddrs
+  staticPeers?: string[]; // Optional array of static peer multiaddrs
+  sharedKey?: string; // Hex string of the shared PSK (without headers)
+  dhtProtocolID?: string; // DHT protocol prefix, default '/teranode'
+  topics?: string[]; // Array of topics to subscribe to
+  listenAddresses?: string[]; // Listening addresses
+  usePrivateDHT?: boolean; // Whether to use private DHT
 }
 
-export class P2PNode {
-  node: Libp2p<{ pubsub: GossipSub }> | null = null;
-  private topics: string[] = [
-    'bitcoin/mainnet-bestblock',
-    'bitcoin/mainnet-block',
-    'bitcoin/mainnet-subtree',
-    'bitcoin/mainnet-mining_on',
-    'bitcoin/mainnet-handshake',
-    'bitcoin/mainnet-rejected_tx',
-    ];
-  private messageHandler: (message: Uint8Array) => void;
-  private staticPeers: string[] = [];
-  private reconnectionInterval: NodeJS.Timeout | null = null;
+interface TeranodeListenerConfig extends Omit<SubscriberConfig, 'topics'> {
+  // Inherits all SubscriberConfig options except topics
+}
 
-  private constructor(messageHandler: (message: Uint8Array) => void, options: P2PNodeOptions = {}) {
-    this.messageHandler = messageHandler;
+/**
+ * TeranodeListener provides a callback-based API for subscribing to Teranode P2P topics.
+ * Each topic can have its own callback function for handling messages.
+ */
+export class TeranodeListener {
+  private node: Libp2p | null = null;
+  private topicCallbacks: TopicCallbacks;
+  private config: TeranodeListenerConfig;
+  private reconnectionInterval?: NodeJS.Timeout;
+
+  /**
+   * Creates a new TeranodeListener instance.
+   * @param topicCallbacks - Object mapping topic names to callback functions
+   * @param config - Optional configuration (uses Teranode mainnet defaults)
+   */
+  constructor(topicCallbacks: TopicCallbacks, config: TeranodeListenerConfig = {}) {
+    this.topicCallbacks = topicCallbacks;
+    this.config = config;
+    
+    // Start the listener automatically
+    this.start().catch(console.error);
   }
 
-  static async create(messageHandler: (message: Uint8Array) => void, options: P2PNodeOptions = {}): Promise<P2PNode> {
-    const instance = new P2PNode(messageHandler, options);
-    await instance.init(options);
-    return instance;
-  }
+  /**
+   * Start the P2P listener and subscribe to topics
+   */
+  async start(): Promise<void> {
+    if (this.node) {
+      console.warn('TeranodeListener is already started');
+      return;
+    }
 
-  // Create a logger that works for both our use and libp2p's expectations
-  private createLogger() {
-    const baseLogger = {
-      log: (message: any, ...args: any[]) => {
-        console.log(`[P2P] ${new Date().toISOString()}`, message, ...args);
-      },
-      error: (message: any, ...args: any[]) => {
-        console.error(`[P2P ERROR] ${new Date().toISOString()}`, message, ...args);
-      },
-      warn: (message: any, ...args: any[]) => {
-        console.warn(`[P2P WARN] ${new Date().toISOString()}`, message, ...args);
-      },
-      info: (message: any, ...args: any[]) => {
-        console.info(`[P2P INFO] ${new Date().toISOString()}`, message, ...args);
-      },
-      debug: (message: any, ...args: any[]) => {
-        console.debug(`[P2P DEBUG] ${new Date().toISOString()}`, message, ...args);
-      },
-      trace: (message: any, ...args: any[]) => {
-        console.trace(`[P2P TRACE] ${new Date().toISOString()}`, message, ...args);
-      },
-      forComponent: (component: string) => ({
-        log: (message: any, ...args: any[]) => {
-          console.log(`[P2P:${component}] ${new Date().toISOString()}`, message, ...args);
-        },
-        error: (message: any, ...args: any[]) => {
-          console.error(`[P2P:${component} ERROR] ${new Date().toISOString()}`, message, ...args);
-        },
-        warn: (message: any, ...args: any[]) => {
-          console.warn(`[P2P:${component} WARN] ${new Date().toISOString()}`, message, ...args);
-        },
-        info: (message: any, ...args: any[]) => {
-          console.info(`[P2P:${component} INFO] ${new Date().toISOString()}`, message, ...args);
-        },
-        debug: (message: any, ...args: any[]) => {
-          console.debug(`[P2P:${component} DEBUG] ${new Date().toISOString()}`, message, ...args);
-        },
-        trace: (message: any, ...args: any[]) => {
-          console.trace(`[P2P:${component} TRACE] ${new Date().toISOString()}`, message, ...args);
-        }
-      })
+    const topics = Object.keys(this.topicCallbacks);
+    const fullConfig: SubscriberConfig = {
+      ...this.config,
+      topics
     };
-    return baseLogger;
-  }
 
-  private logger = this.createLogger();
+    // Create the libp2p node using the same logic as startSubscriber
+    const {
+      bootstrapPeers = ['/dns4/teranode-bootstrap.bsvb.tech/tcp/9901/p2p/12D3KooWESmhNAN8s6NPdGNvJH3zJ4wMKDxapXKNUe2DzkAwKYqK'],
+      staticPeers = [
+        '/dns4/teranode-mainnet-peer.taal.com/tcp/9905/p2p/12D3KooWJGPdPPw72GU6gFF4LqUjeFF7qmPCS2bZK8ywMvybYfXD',
+        '/dns4/teranode-mainnet-us-01.bsvb.tech/tcp/9905/p2p/12D3KooWPJAHHaNy5BsViK1B5iTQmz5cLaUheAKEuNkHqMbwZ8jd',
+        '/dns4/teranode-eks-mainnet-us-1-peer.bsvb.tech/tcp/9911/p2p/12D3KooWFjGChbwVteGsqH6NfHtKbtdW5XgnvmQRpem2kUAQjsGq',
+        '/dns4/bsva-ovh-teranode-eu-1.bsvb.tech/tcp/9905/p2p/12D3KooWAdBeSVue71DTmfMEKyBG2s1hg91zJnze85rt2uKCZWbW',
+        '/dns4/teranode-eks-mainnet-eu-1-peer.bsvb.tech/tcp/9911/p2p/12D3KooWRioUF2AYvC6ofiXhjE5V3MLiVrRKMAEyHiz5iYQgnB5f'
+      ],
+      sharedKey = '285b49e6d910726a70f205086c39cbac6d8dcc47839053a21b1f614773bbc137',
+      dhtProtocolID = '/teranode',
+      listenAddresses = ['/ip4/127.0.0.1/tcp/9901'],
+      usePrivateDHT = true,
+    } = fullConfig;
 
-  private async init(options: P2PNodeOptions) {
-    const libp2pOptions: any = {
+    // Format the PSK
+    const pskText = `/key/swarm/psk/1.0.0/\n/base16/\n${sharedKey}`;
+    const psk = new TextEncoder().encode(pskText);
+    const connectionProtector = preSharedKey({ psk });
+    const privateKey: PrivateKey = await generateKeyPair('Ed25519');
+
+    this.node = await createLibp2p({
+      privateKey,
       addresses: {
-        listen: options.listenAddresses || ['/ip4/0.0.0.0/tcp/0']
+        listen: listenAddresses,
       },
       transports: [tcp()],
-      streamMuxers: [yamux()],
       connectionEncrypters: [noise()],
+      streamMuxers: [yamux()],
+      connectionProtector,
+      peerDiscovery: [
+        bootstrap({ list: bootstrapPeers }),
+        pubsubPeerDiscovery({
+          topics,
+          interval: 5000,
+        }),
+      ],
       services: {
-        pubsub: gossipsub({ 
+        dht: kadDHT({
+          protocol: `${dhtProtocolID}/kad/1.0.0`,
+          clientMode: false,
+          validators: {},
+          selectors: {},
+        }),
+        pubsub: gossipsub({
           allowPublishToZeroTopicPeers: true,
           emitSelf: false,
           fallbackToFloodsub: true,
           floodPublish: true,
-          doPX: true
+          doPX: true,
         }),
         identify: identify(),
-        ping: ping()
+        ping: ping(),
       },
-      peerDiscovery: [
-        bootstrap({ list: options.bootstrapPeers || [] }), 
-        pubsubPeerDiscovery({
-          topics: this.topics,
-          interval: 5000,
-        })],
-    };
-
-    // Add DHT service - configure differently for private vs public networks
-    if (options.usePrivateDHT && options.dhtProtocolID) {
-      // Private DHT configuration to match Go implementation
-      libp2pOptions.services.dht = kadDHT({
-        protocol: options.dhtProtocolID + '/kad/1.0.0',
-        clientMode: false,
-        validators: {},
-        selectors: {}
-      });
-    } else {
-      // Public DHT configuration
-      libp2pOptions.services.dht = kadDHT({
-        protocol: '/ipfs/kad/1.0.0',
-        clientMode: false
-      });
-    }
-
-    if (options.usePrivateDHT && options.sharedKey) {
-      this.logger.info('Using private DHT with shared key:', options.sharedKey);
-      
-      // Format PSK in the same way as Go implementation
-      const pskString = `/key/swarm/psk/1.0.0/\n/base16/\n${options.sharedKey}`;
-      
-      this.logger.info('PSK formatted string:', pskString);
-      libp2pOptions.connectionProtector = preSharedKey({
-        psk: new TextEncoder().encode(pskString)
-      });
-    }
-
-    this.logger.info('Creating libp2p node with options:', {
-      listenAddresses: options.listenAddresses,
-      bootstrapPeers: options.bootstrapPeers,
-      usePrivateDHT: options.usePrivateDHT
     });
 
-    this.node = await createLibp2p(libp2pOptions);
-
-    this.logger.info('Starting libp2p node...');
     await this.node.start();
-    this.logger.info('Libp2p node started successfully');
+    console.log('TeranodeListener started with Peer ID:', this.node.peerId.toString());
 
-    // Add event listeners for debugging
-    this.node.addEventListener('peer:discovery', async (evt) => {
-      this.logger.info('Peer discovered:', evt.detail.id.toString());
-      this.logger.info('Peer multiaddrs:', evt.detail.multiaddrs.map(ma => ma.toString()));
-      
-      // Try to manually connect to discovered peer
-      if (this.node) {
-        try {
-          this.logger.info('Attempting to connect to discovered peer...');
-          await this.node.dial(evt.detail.id);
-          this.logger.info('Successfully dialed discovered peer');
-        } catch (error) {
-          this.logger.error('Failed to dial discovered peer:', error);
-        }
-      }
-    });
+    // Set up event listeners
+    this.setupEventListeners();
 
-    this.node.addEventListener('peer:connect', (evt) => {
-      this.logger.info('✅ Peer connected:', evt.detail.toString());
-      if (this.node) {
-        this.logger.info('Total connected peers:', this.node.getPeers().length);
-      }
-    });
+    // Subscribe to topics with callbacks
+    this.setupTopicSubscriptions();
 
-    this.node.addEventListener('peer:disconnect', (evt) => {
-      this.logger.info('❌ Peer disconnected:', evt.detail.toString());
-      if (this.node) {
-        this.logger.info('Remaining connected peers:', this.node.getPeers().length);
-      }
-    });
-
-    // Subscribe to topics and advertise them
-    for (const topic of this.topics) {
-      this.logger.info(`Subscribing to topic: ${topic}`);
-      this.node.services.pubsub.subscribe(topic);
-      const subscribers = this.node.services.pubsub.getSubscribers(topic).map(p => p.toString());
-      this.logger.info(`Subscribers for ${topic}:`, subscribers);
-      
-      // Advertise topic subscription via DHT (similar to Go implementation)
-      try {
-        if ('dht' in this.node.services) {
-          const topicKey = new TextEncoder().encode(`/pubsub/topic/${topic}`);
-          await (this.node.services as any).dht.provide(topicKey);
-          this.logger.info(`Advertising topic: ${topic}`);
-        } else {
-          this.logger.warn('DHT service not available for topic advertising');
-        }
-      } catch (error) {
-        this.logger.warn(`Failed to advertise topic ${topic}:`, error);
-      }
+    // Connect to static peers if provided
+    if (staticPeers.length > 0) {
+      await this.connectToStaticPeers(staticPeers);
+      this.reconnectionInterval = this.startStaticPeerMonitoring(staticPeers);
     }
 
-    // Create component-specific logger for gossipsub
-    const gossipLogger = this.logger.forComponent('gossipsub');
-
-    // Handle incoming messages
-    this.node.services.pubsub.addEventListener('gossipsub:message', (evt: any) => {
-      const msg = evt.detail.msg;
-      gossipLogger.info('Received message from topic:', msg.topic);
-      this.messageHandler(msg.data);
-    });
-
-    // Connect to static peers if configured
-    if (options.staticPeers && options.staticPeers.length > 0) {
-      this.staticPeers = [...options.staticPeers]; // Store for reconnection
-      this.logger.info(`Connecting to ${options.staticPeers.length} static peers...`);
-      await this.connectToStaticPeers(options.staticPeers);
-      
-      // Start periodic reconnection monitoring
-      this.startStaticPeerMonitoring();
-    }
+    // Handle graceful shutdown
+    process.on('SIGINT', () => this.stop());
   }
 
-  private async connectToStaticPeers(staticPeers: string[]) {
+  /**
+   * Stop the P2P listener
+   */
+  async stop(): Promise<void> {
     if (!this.node) {
-      this.logger.warn('Cannot connect to static peers: node not initialized');
       return;
     }
 
-    const connectionPromises = staticPeers.map(async (peerAddr) => {
-      try {
-        this.logger.info(`Attempting to connect to static peer: ${peerAddr}`);
-        await this.node!.dial(multiaddr(peerAddr));
-        this.logger.info(`✅ Successfully connected to static peer: ${peerAddr}`);
-      } catch (error) {
-        this.logger.warn(`❌ Failed to connect to static peer ${peerAddr}:`, error);
+    console.log('Stopping TeranodeListener...');
+    
+    if (this.reconnectionInterval) {
+      clearInterval(this.reconnectionInterval);
+    }
+
+    await this.node.stop();
+    this.node = null;
+    console.log('TeranodeListener stopped');
+  }
+
+  /**
+   * Add a new topic callback
+   */
+  addTopicCallback(topic: string, callback: MessageCallback): void {
+    this.topicCallbacks[topic] = callback;
+    
+    if (this.node) {
+      (this.node.services.pubsub as any).subscribe(topic);
+      console.log(`Subscribed to new topic: ${topic}`);
+    }
+  }
+
+  /**
+   * Remove a topic callback
+   */
+  removeTopicCallback(topic: string): void {
+    delete this.topicCallbacks[topic];
+    
+    if (this.node) {
+      (this.node.services.pubsub as any).unsubscribe(topic);
+      console.log(`Unsubscribed from topic: ${topic}`);
+    }
+  }
+
+  /**
+   * Get the current libp2p node instance
+   */
+  getNode(): Libp2p | null {
+    return this.node;
+  }
+
+  /**
+   * Get connected peer count
+   */
+  getConnectedPeerCount(): number {
+    return this.node ? this.node.getPeers().length : 0;
+  }
+
+  private setupEventListeners(): void {
+    if (!this.node) return;
+
+    this.node.addEventListener('peer:discovery', (evt: any) => {
+      console.log('Peer discovered:', evt.detail.id.toString());
+    });
+
+    this.node.addEventListener('peer:connect', (evt: any) => {
+      console.log('✅ Peer connected:', evt.detail.toString());
+      console.log('Total connected peers:', this.node!.getPeers().length);
+    });
+
+    this.node.addEventListener('peer:disconnect', (evt: any) => {
+      console.log('❌ Peer disconnected:', evt.detail.toString());
+      console.log('Remaining connected peers:', this.node!.getPeers().length);
+    });
+  }
+
+  private setupTopicSubscriptions(): void {
+    if (!this.node) return;
+
+    // Subscribe to topics and handle messages with callbacks
+    (this.node.services.pubsub as any).addEventListener('gossipsub:message', (evt: any) => {
+      const msg = evt.detail.msg;
+      const callback = this.topicCallbacks[msg.topic];
+      
+      if (callback) {
+        try {
+          callback(msg.data, msg.topic, evt.detail.propagationSource.toString());
+        } catch (error) {
+          console.error(`Error in callback for topic ${msg.topic}:`, error);
+        }
+      } else {
+        console.log(`Received message on unhandled topic "${msg.topic}"`);
       }
     });
 
-    // Wait for all connection attempts to complete (with individual error handling)
-    await Promise.allSettled(connectionPromises);
-    
-    const connectedPeers = this.node.getPeers().length;
-    this.logger.info(`Static peer connection complete. Total connected peers: ${connectedPeers}`);
+    // Subscribe to all topics
+    for (const topic of Object.keys(this.topicCallbacks)) {
+      (this.node.services.pubsub as any).subscribe(topic);
+      console.log(`Subscribed to topic: ${topic}`);
+    }
   }
 
-  private startStaticPeerMonitoring() {
-    // Check static peer connections every 30 seconds
-    this.reconnectionInterval = setInterval(async () => {
-      if (!this.node || this.staticPeers.length === 0) {
-        return;
+  private async connectToStaticPeers(staticPeers: string[]): Promise<void> {
+    if (!this.node) return;
+
+    const connectionPromises = staticPeers.map(async (peerAddr) => {
+      try {
+        console.log(`Attempting to connect to static peer: ${peerAddr}`);
+        await this.node!.dial(multiaddr(peerAddr));
+        console.log(`✅ Successfully connected to static peer: ${peerAddr}`);
+      } catch (error) {
+        console.error(`❌ Failed to connect to static peer ${peerAddr}:`, error);
       }
+    });
+
+    await Promise.allSettled(connectionPromises);
+    console.log(`Static peer connection complete. Total connected peers: ${this.node.getPeers().length}`);
+  }
+
+  private startStaticPeerMonitoring(staticPeers: string[]): NodeJS.Timeout {
+    return setInterval(async () => {
+      if (!this.node) return;
 
       const connectedPeerIds = this.node.getPeers().map(p => p.toString());
-      const disconnectedStaticPeers: string[] = [];
+      const disconnectedStaticPeers = [];
 
-      // Check which static peers are disconnected
-      for (const staticPeer of this.staticPeers) {
+      for (const staticPeer of staticPeers) {
         try {
-          // Extract peer ID from multiaddr
           const peerIdMatch = staticPeer.match(/\/p2p\/([^/]+)$/);
           if (peerIdMatch) {
             const peerId = peerIdMatch[1];
@@ -279,101 +280,162 @@ export class P2PNode {
             }
           }
         } catch (error) {
-          this.logger.warn(`Error checking static peer ${staticPeer}:`, error);
+          console.error(`Error checking static peer ${staticPeer}:`, error);
         }
       }
 
-      // Reconnect to disconnected static peers
       if (disconnectedStaticPeers.length > 0) {
-        this.logger.info(`Reconnecting to ${disconnectedStaticPeers.length} disconnected static peers...`);
+        console.log(`Reconnecting to ${disconnectedStaticPeers.length} disconnected static peers...`);
         await this.connectToStaticPeers(disconnectedStaticPeers);
       }
     }, 30000); // 30 seconds
   }
+}
 
-  async discoverPeerById(peerId: string): Promise<string | null> {
-    if (!this.node) {
-      return null;
-    }
+export async function startSubscriber(config: SubscriberConfig = {}): Promise<void> {
+  const {
+    bootstrapPeers = ['/dns4/teranode-bootstrap.bsvb.tech/tcp/9901/p2p/12D3KooWESmhNAN8s6NPdGNvJH3zJ4wMKDxapXKNUe2DzkAwKYqK'],
+    staticPeers = [
+      // Active Teranode peers discovered from Go implementation
+      '/dns4/teranode-mainnet-peer.taal.com/tcp/9905/p2p/12D3KooWJGPdPPw72GU6gFF4LqUjeFF7qmPCS2bZK8ywMvybYfXD',
+      '/dns4/teranode-mainnet-us-01.bsvb.tech/tcp/9905/p2p/12D3KooWPJAHHaNy5BsViK1B5iTQmz5cLaUheAKEuNkHqMbwZ8jd',
+      '/dns4/teranode-eks-mainnet-us-1-peer.bsvb.tech/tcp/9911/p2p/12D3KooWFjGChbwVteGsqH6NfHtKbtdW5XgnvmQRpem2kUAQjsGq',
+      '/dns4/bsva-ovh-teranode-eu-1.bsvb.tech/tcp/9905/p2p/12D3KooWAdBeSVue71DTmfMEKyBG2s1hg91zJnze85rt2uKCZWbW',
+      '/dns4/teranode-eks-mainnet-eu-1-peer.bsvb.tech/tcp/9911/p2p/12D3KooWRioUF2AYvC6ofiXhjE5V3MLiVrRKMAEyHiz5iYQgnB5f'
+    ],
+    sharedKey = '285b49e6d910726a70f205086c39cbac6d8dcc47839053a21b1f614773bbc137',
+    dhtProtocolID = '/teranode',
+    topics = ['teranode/blocks', 'teranode/transactions'],
+    listenAddresses = ['/ip4/127.0.0.1/tcp/9901'],
+    usePrivateDHT = true,
+  } = config;
 
+  // Format the PSK
+  const pskText = `/key/swarm/psk/1.0.0/\n/base16/\n${sharedKey}`;
+  const psk = new TextEncoder().encode(pskText);
+
+  const connectionProtector = preSharedKey({ psk });
+
+  const privateKey: PrivateKey = await generateKeyPair('Ed25519');
+
+  const node = await createLibp2p({
+    privateKey,
+    addresses: {
+      listen: listenAddresses,
+    },
+    transports: [tcp()],
+    connectionEncrypters: [noise()],
+    streamMuxers: [yamux()],
+    connectionProtector,
+    peerDiscovery: [
+      bootstrap({ list: bootstrapPeers }),
+      pubsubPeerDiscovery({
+        topics,
+        interval: 5000,
+      }),
+    ],
+    services: {
+      dht: kadDHT({
+        protocol: `${dhtProtocolID}/kad/1.0.0`,
+        clientMode: false,
+        validators: {},
+        selectors: {},
+      }),
+      pubsub: gossipsub({
+        allowPublishToZeroTopicPeers: true,
+        emitSelf: false,
+        fallbackToFloodsub: true,
+        floodPublish: true,
+        doPX: true,
+      }),
+      identify: identify(),
+      ping: ping(),
+    },
+  });
+
+  await node.start();
+  console.log('Libp2p node started with Peer ID:', node.peerId.toString());
+
+  // Event listeners for logging
+  node.addEventListener('peer:discovery', (evt) => {
+    console.log('Peer discovered:', evt.detail.id.toString());
+    console.log('Peer multiaddrs:', evt.detail.multiaddrs.map(ma => ma.toString()));
+  });
+
+  node.addEventListener('peer:connect', (evt) => {
+    console.log('✅ Peer connected:', evt.detail.toString());
+    console.log('Total connected peers:', node.getPeers().length);
+  });
+
+  node.addEventListener('peer:disconnect', (evt) => {
+    console.log('❌ Peer disconnected:', evt.detail.toString());
+    console.log('Remaining connected peers:', node.getPeers().length);
+  });
+
+  // Subscribe to topics and handle messages
+  node.services.pubsub.addEventListener('gossipsub:message', (evt) => {
+    const msg = evt.detail.msg;
+    console.log(`[${msg.topic}] ${msg.data} - from: ${evt.detail.propagationSource}`);
+  });
+
+  for (const topic of topics) {
+    node.services.pubsub.subscribe(topic);
+    console.log(`Subscribed to topic: ${topic}`);
+  }
+
+  // Connect to static peers if provided
+  let reconnectionInterval: NodeJS.Timeout | undefined;
+  if (staticPeers.length > 0) {
+    await connectToStaticPeers(node, staticPeers);
+    reconnectionInterval = startStaticPeerMonitoring(node, staticPeers);
+  }
+
+  // Handle graceful shutdown
+  process.on('SIGINT', async () => {
+    console.log('Shutting down...');
+    if (reconnectionInterval) clearInterval(reconnectionInterval);
+    await node.stop();
+    process.exit(0);
+  });
+}
+
+async function connectToStaticPeers(node: Libp2p, staticPeers: string[]) {
+  const connectionPromises = staticPeers.map(async (peerAddr) => {
     try {
-      this.logger.info(`Searching for peer ${peerId} in DHT...`);
-      const peerIdObj = peerIdFromString(peerId);
-      const peerInfo = await this.node.peerStore.get(peerIdObj);
-      
-      if (peerInfo && peerInfo.addresses.length > 0) {
-        const multiaddr = peerInfo.addresses[0].multiaddr.toString();
-        this.logger.info(`Found peer ${peerId} at address: ${multiaddr}`);
-        return multiaddr;
-      }
+      console.log(`Attempting to connect to static peer: ${peerAddr}`);
+      await node.dial(multiaddr(peerAddr));
+      console.log(`✅ Successfully connected to static peer: ${peerAddr}`);
     } catch (error) {
-      this.logger.warn(`Failed to find peer ${peerId}:`, error);
+      console.error(`❌ Failed to connect to static peer ${peerAddr}:`, error);
     }
-    
-    return null;
-  }
+  });
 
-  async connectToPeerById(peerId: string) {
-    const address = await this.discoverPeerById(peerId);
-    if (address) {
+  await Promise.allSettled(connectionPromises);
+  console.log(`Static peer connection complete. Total connected peers: ${node.getPeers().length}`);
+}
+
+function startStaticPeerMonitoring(node: Libp2p, staticPeers: string[]): NodeJS.Timeout {
+  return setInterval(async () => {
+    const connectedPeerIds = node.getPeers().map(p => p.toString());
+    const disconnectedStaticPeers: string[] = [];
+
+    for (const staticPeer of staticPeers) {
       try {
-        await this.node!.dial(multiaddr(address));
-        this.logger.info(`✅ Successfully connected to peer by ID: ${peerId}`);
+        const peerIdMatch = staticPeer.match(/\/p2p\/([^/]+)$/);
+        if (peerIdMatch) {
+          const peerId = peerIdMatch[1];
+          if (!connectedPeerIds.includes(peerId)) {
+            disconnectedStaticPeers.push(staticPeer);
+          }
+        }
       } catch (error) {
-        this.logger.warn(`❌ Failed to connect to peer ${peerId}:`, error);
+        console.error(`Error checking static peer ${staticPeer}:`, error);
       }
-    } else {
-      this.logger.warn(`Could not discover address for peer ${peerId}`);
     }
-  }
 
-  async stop() {
-    // Clear static peer monitoring
-    if (this.reconnectionInterval) {
-      clearInterval(this.reconnectionInterval);
-      this.reconnectionInterval = null;
+    if (disconnectedStaticPeers.length > 0) {
+      console.log(`Reconnecting to ${disconnectedStaticPeers.length} disconnected static peers...`);
+      await connectToStaticPeers(node, disconnectedStaticPeers);
     }
-    
-    if (this.node) {
-      await this.node.stop();
-    }
-  }
-
-  async publish(topic: string, message: Uint8Array) {
-    if (!this.node) {
-      throw new Error('Node not initialized');
-    }
-    await this.node.services.pubsub.publish(topic, message);
-    this.logger.info(`Published message to topic: ${topic}`);
-  }
-
-  getConnectedPeers() {
-    if (!this.node) {
-      return [];
-    }
-    return this.node.getPeers();
-  }
-
-  getNodeId() {
-    if (!this.node) {
-      return null;
-    }
-    return this.node.peerId.toString();
-  }
-
-  async getTopicPeers(topic: string) {
-    if (!this.node) {
-      return [];
-    }
-    const subscribers = this.node.services.pubsub.getSubscribers(topic);
-    // Handle different return formats
-    if (Array.isArray(subscribers)) {
-      return subscribers;
-    }
-    // If it returns an object with subscribers property
-    if (subscribers && typeof subscribers === 'object' && 'subscribers' in subscribers) {
-      return (subscribers as any).subscribers || [];
-    }
-    return [];
-  }
+  }, 30000); // 30 seconds
 }
