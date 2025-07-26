@@ -1,5 +1,5 @@
 {
-    "name": "@bsv/teranode-p2p-listener",
+    "name": "@bsv/teranode-listener",
     "version": "1.0.0",
     "description": "An npm package to subscribe to Teranode P2P topics in a private DHT network and log messages",
     "main": "dist/index.js",
