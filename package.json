@@ -1,0 +1,37 @@
+{
+  "name": "go-p2p-ts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TypeScript wrapper for go-p2p functionality",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "demo": "tsx demo.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@bsv/sdk": "^1.6.17",
+    "@chainsafe/libp2p-gossipsub": "^14.1.1",
+    "@chainsafe/libp2p-noise": "^16.1.4",
+    "@chainsafe/libp2p-yamux": "^7.0.4",
+    "@libp2p/bootstrap": "^11.0.46",
+    "@libp2p/identify": "^3.0.38",
+    "@libp2p/interface": "^2.10.5",
+    "@libp2p/kad-dht": "^15.1.10",
+    "@libp2p/peer-id": "^5.0.7",
+    "@libp2p/ping": "^2.0.36",
+    "@libp2p/pnet": "^2.0.46",
+    "@libp2p/pubsub-peer-discovery": "^11.0.2",
+    "@libp2p/tcp": "^10.1.18",
+    "@multiformats/multiaddr": "^12.3.3",
+    "libp2p": "^2.9.0",
+    "uint8arrays": "^5.1.0"
+  }
+}
