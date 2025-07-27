@@ -2,8 +2,14 @@
     "name": "@bsv/teranode-listener",
     "version": "1.0.0",
     "description": "An npm package to subscribe to Teranode P2P topics in a private DHT network and log messages",
+    "type": "module",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
+    "files": [
+      "dist/**/*",
+      "README.md",
+      "LICENSE"
+    ],
     "scripts": {
       "build": "tsc"
     },
@@ -36,5 +42,16 @@
       "pubsub",
       "bsv"
     ],
-    "license": "MIT"
+    "license": "MIT",
+    "engines": {
+      "node": ">=18.0.0"
+    },
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/bsv-blockchain/ts-p2p.git"
+    },
+    "homepage": "https://github.com/bsv-blockchain/ts-p2p#readme",
+    "bugs": {
+      "url": "https://github.com/bsv-blockchain/ts-p2p/issues"
+    }
   }

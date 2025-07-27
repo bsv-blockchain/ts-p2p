@@ -32,6 +32,13 @@ The `@bsv/teranode-listener` package provides a simple yet powerful interface fo
 npm install @bsv/teranode-listener
 ```
 
+### Requirements
+
+- **Node.js**: Version 18.0.0 or higher
+- **ES Modules**: This package is published as an ES module. Ensure your project supports ES modules by either:
+  - Adding `"type": "module"` to your `package.json`, or
+  - Using `.mjs` file extensions for your JavaScript files
+
 ## Getting Started
 
 ### Callback-Based API (Recommended)
@@ -69,8 +76,13 @@ Alternatively, you can use the original function-based API:
 ```typescript
 import { startSubscriber } from '@bsv/teranode-listener';
 
-// Start with defaults - connects to Teranode mainnet
-await startSubscriber();
+// Start with default configuration (connects to Teranode mainnet)
+const { node, stop } = await startSubscriber({
+  onMessage: (data, topic, from) => {
+    console.log(`Message on ${topic} from ${from}:`, data);
+  }
+});
+
 console.log('Subscriber started and listening for messages...');
 ```
 
@@ -271,31 +283,22 @@ console.log('Listener started, waiting for messages...');
 ```typescript
 import { TeranodeListener } from '@bsv/teranode-listener';
 
-// Custom configuration with different port
-const listener = new TeranodeListener(
-  {
-    'bitcoin/mainnet-block': (data, topic, from) => {
-      // Parse and validate block data
-      try {
-        console.log('Processing block:', data);
-        // Your block processing logic here
-      } catch (error) {
-        console.error('Error processing block:', error);
-      }
-    },
-    'bitcoin/mainnet-transaction': (data, topic, from) => {
-      console.log('New transaction received');
-      // Your transaction processing logic here
-    }
+// Create a listener with topic-specific callbacks
+const listener = new TeranodeListener({
+  'bitcoin/mainnet-block': (data, topic, from) => {
+    console.log(`Received block from ${from}:`, data);
   },
-  {
-    listenAddresses: ['/ip4/0.0.0.0/tcp/4000']
+  'bitcoin/mainnet-subtree': (data, topic, from) => {
+    console.log(`Received subtree from ${from}:`, data);
   }
-);
+});
+
+// The listener starts automatically
+console.log('Connected peers:', listener.getConnectedPeerCount());
 
 // Add more topics dynamically
-listener.addTopicCallback('bitcoin/mainnet-mempool', (data, topic, from) => {
-  console.log('Mempool update:', data.length, 'bytes');
+listener.addTopicCallback('bitcoin/mainnet-transaction', (data, topic, from) => {
+  console.log(`Received transaction from ${from}:`, data);
 });
 
 // Monitor connection status

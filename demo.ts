@@ -1,4 +1,4 @@
-import { TeranodeListener, type Topic } from './src/index';
+import { TeranodeListener, type Topic } from './src/index.js';
 
 // Demo of the new TeranodeListener API
 const blockCallback = (data: Uint8Array, topic: Topic, from: string) => {
