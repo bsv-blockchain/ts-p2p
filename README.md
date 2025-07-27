@@ -1,4 +1,4 @@
-# @bsv/teranode-p2p-listener
+# @bsv/teranode-listener
 
 BSV BLOCKCHAIN | A TypeScript library for subscribing to Teranode P2P topics in a private DHT network
 
@@ -18,7 +18,7 @@ A robust npm package that enables subscription to Teranode P2P topics using libp
 
 ## Overview
 
-The `@bsv/teranode-p2p-listener` package provides a simple yet powerful interface for connecting to Teranode's private P2P network. It handles:
+The `@bsv/teranode-listener` package provides a simple yet powerful interface for connecting to Teranode's private P2P network. It handles:
 
 - **Private Network Access**: Secure connections using pre-shared keys (PSK)
 - **DHT Integration**: Distributed hash table for peer discovery
@@ -29,7 +29,7 @@ The `@bsv/teranode-p2p-listener` package provides a simple yet powerful interfac
 ## Installation
 
 ```bash
-npm install @bsv/teranode-p2p-listener
+npm install @bsv/teranode-listener
 ```
 
 ## Getting Started
@@ -39,7 +39,7 @@ npm install @bsv/teranode-p2p-listener
 The easiest way to use the library is with the `TeranodeListener` class, which provides topic-specific callbacks:
 
 ```typescript
-import { TeranodeListener } from '@bsv/teranode-p2p-listener';
+import { TeranodeListener } from '@bsv/teranode-listener';
 
 // Define callback functions for different topics
 const blockCallback = (data: Uint8Array, topic: string, from: string) => {
@@ -67,7 +67,7 @@ console.log('Listener started and waiting for messages...');
 Alternatively, you can use the original function-based API:
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 // Start with defaults - connects to Teranode mainnet
 await startSubscriber();
@@ -83,7 +83,7 @@ Both approaches automatically:
 ### Custom Configuration
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 const config = {
   topics: ['teranode/blocks'], // Only subscribe to blocks
@@ -98,7 +98,7 @@ console.log('Subscriber started with custom configuration...');
 ### Complete Custom Setup
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 const config = {
   bootstrapPeers: [
@@ -249,7 +249,7 @@ The `sharedKey` should be provided as a hexadecimal string without the PSK heade
 ### Example 1: Basic TeranodeListener Usage
 
 ```typescript
-import { TeranodeListener, type Topic } from '@bsv/teranode-p2p-listener';
+import { TeranodeListener, type Topic } from '@bsv/teranode-listener';
 
 // Simple callback-based listener
 const listener = new TeranodeListener({
@@ -269,7 +269,7 @@ console.log('Listener started, waiting for messages...');
 ### Example 2: Advanced TeranodeListener with Custom Configuration
 
 ```typescript
-import { TeranodeListener } from '@bsv/teranode-p2p-listener';
+import { TeranodeListener } from '@bsv/teranode-listener';
 
 // Custom configuration with different port
 const listener = new TeranodeListener(
@@ -307,7 +307,7 @@ setInterval(() => {
 ### Example 3: Function-Based API (Legacy)
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 // Connect to Teranode mainnet with all defaults
 startSubscriber()
@@ -318,7 +318,7 @@ startSubscriber()
 ### Example 4: Custom Port and Multiple Topics (Function API)
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 // Use a different port and subscribe to multiple topics
 const config = {
@@ -337,7 +337,7 @@ console.log('Listening on port 4000 for blocks, transactions, and mempool...');
 ### Example 5: Environment-Based Configuration
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 const config = {
   topics: process.env.TOPICS?.split(',') || undefined, // Use defaults if not set
@@ -353,7 +353,7 @@ console.log('Started with environment configuration...');
 ### Example 6: Complete Custom Network
 
 ```typescript
-import { startSubscriber } from '@bsv/teranode-p2p-listener';
+import { startSubscriber } from '@bsv/teranode-listener';
 
 // Connect to a custom private network
 const config = {
@@ -415,7 +415,7 @@ This package relies on several key libp2p modules:
 
 ## Contributing
 
-We welcome contributions to improve the `@bsv/teranode-p2p-listener` package. Whether it's bug reports, feature requests, or pull requests - all contributions are appreciated.
+We welcome contributions to improve the `@bsv/teranode-listener` package. Whether it's bug reports, feature requests, or pull requests - all contributions are appreciated.
 
 ### How to Contribute
 
