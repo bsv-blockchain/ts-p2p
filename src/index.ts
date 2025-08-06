@@ -32,7 +32,13 @@ export type Topic =
 'bitcoin/mainnet-subtree' |
 'bitcoin/mainnet-mining_on' |
 'bitcoin/mainnet-handshake' |
-'bitcoin/mainnet-rejected_tx'
+'bitcoin/mainnet-rejected_tx' |
+'bitcoin/testnet-bestblock' |
+'bitcoin/testnet-block' |
+'bitcoin/testnet-subtree' |
+'bitcoin/testnet-mining_on' |
+'bitcoin/testnet-handshake' |
+'bitcoin/testnet-rejected_tx'
 
 type TopicCallbacks = Partial<Record<Topic, MessageCallback>>;
 
