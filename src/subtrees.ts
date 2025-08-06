@@ -198,7 +198,7 @@ export class Subtree {
         }
 
         this.nodes.push({
-            hash: new Uint8Array(COINBASE_PLACEHOLDER),
+            hash: COINBASE_PLACEHOLDER,
             fee: BigInt(0),
             sizeInBytes: BigInt(0)
         });
